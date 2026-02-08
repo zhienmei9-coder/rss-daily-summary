@@ -48,7 +48,8 @@ class ArticleDB:
     def _save(self):
         with open(self.db_file, 'w') as f:
             for item in self.seen:
-                f.write(f"{item}\n")
+                f.write(f"{item}
+")
 
     def count(self):
         return len(self.seen)
@@ -56,20 +57,37 @@ class ArticleDB:
 # 解析 OPML
 def parse_opml(opml_file):
     """解析 OPML 文件，返回 RSS 源列表"""
-    tree = ET.parse(opml_file)
-    root = tree.getroot()
-
-    sources = []
-    for outline in root.findall('.//{http://www.guyrutenberg.com/2008/opml}outline'):
-        if not sources:  # 如果没找到，尝试其他命名空间
-            for outline in root.findall('.//outline'):
-                rss_url = outline.get('xmlUrl', '')
-                blog_name = outline.get('text', outline.get('title', 'Unknown'))
-                if rss_url:
-                    sources.append({'name': blog_name, 'url': rss_url})
-        break
-
-    return sources
+    try:
+        tree = ET.parse(opml_file)
+        root = tree.getroot()
+        
+        sources = []
+        
+        # 尝试不同的命名空间
+        namespaces = {
+            'opml': 'http://www.opml.org/spec2',
+            '': ''
+        }
+        
+        # 查找所有 outline 元素
+        for ns in namespaces.values():
+            if ns:
+                outlines = root.findall(f".//{ns}outline")
+            else:
+                outlines = root.findall(".//outline")
+            
+            if outlines:
+                for outline in outlines:
+                    # 只处理有 xmlUrl 属性的 outline（RSS 源）
+                    xml_url = outline.get('xmlUrl', '')
+                    if xml_url:
+                        name = outline.get('text', outline.get('title', 'Unknown'))
+                        sources.append({'name': name, 'url': xml_url})
+        
+        return sources
+    except Exception as e:
+        print(f"解析 OPML 失败: {e}", file=sys.stderr)
+        return []
 
 # 获取 RSS 内容
 def fetch_rss(sources, db):
@@ -105,7 +123,7 @@ def fetch_rss(sources, db):
                 all_articles.append(article)
 
         except Exception as e:
-            print(f"Error fetching {source['name']}: {e}")
+            print(f"Error fetching {source['name']}: {e}", file=sys.stderr)
             continue
 
     return all_articles, total_new, total_seen
@@ -135,21 +153,28 @@ def generate_markdown(articles, total_new, total_seen, db_count):
 """
 
     for article in articles:
-        content += f"### 📌 {article['blog']}\n\n"
-        content += f"- **{article['title']}**\n"
+        content += f"### 📌 {article['blog']}
+
+"
+        content += f"- **{article['title']}**
+"
 
         if article['description']:
             # 清理 HTML 标签
             desc = article['description']
             desc = desc.replace('<', ' <').replace('>', '> ')
-            content += f"  > {desc}...\n"
+            content += f"  > {desc}...
+"
 
-        content += f"  > 🔗 [阅读原文]({article['link']})\n"
+        content += f"  > 🔗 [阅读原文]({article['link']})
+"
 
         if article['published']:
-            content += f"  > 📅 {article['published']}\n"
+            content += f"  > 📅 {article['published']}
+"
 
-        content += "\n"
+        content += "
+"
 
     content += f"""---
 
@@ -166,7 +191,7 @@ def generate_markdown(articles, total_new, total_seen, db_count):
 
 ## 🔖 标签
 
-#DailyRSS #技术博客 #HackerNews #新文章 #${date}
+#DailyRSS #技术博客 #HackerNews #新文章 #{date}
 
 ---
 
@@ -193,13 +218,23 @@ def main():
     sources = parse_opml(OPML_FILE)
     print(f"找到 {len(sources)} 个 RSS 源")
 
+    if not sources:
+        print("警告: 没有找到任何 RSS 源")
+        # 仍然生成一个空笔记
+        filepath = generate_markdown([], 0, 0, db.count())
+        print(f"
+✅ 完成! (空笔记)")
+        print(f"  笔记文件: {filepath}")
+        return
+
     # 获取新文章
     articles, total_new, total_seen = fetch_rss(sources, db)
 
     # 生成 Markdown
     filepath = generate_markdown(articles, total_new, total_seen, db.count())
 
-    print(f"\n✅ 完成!")
+    print(f"
+✅ 完成!")
     print(f"  新文章: {total_new}")
     print(f"  已跳过: {total_seen}")
     print(f"  数据库总数: {db.count()}")
