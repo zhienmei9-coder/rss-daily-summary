@@ -6,12 +6,22 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
 import feedparser
+import html
 
 # 配置
 OPML_FILE = "opml/feeds.opml"
 DB_FILE = ".rss/articles.db"
 OUTPUT_DIR = "Daily RSS"
-TRANSLATE_TO_CHINESE = True  # 设置为 True 启用翻译
+ENABLE_TRANSLATION = True  # 启用翻译
+
+try:
+    from deep_translator import GoogleTranslator
+    translator = GoogleTranslator(source='auto', target='zh-CN')
+    TRANSLATION_AVAILABLE = True
+except ImportError:
+    TRANSLATION_AVAILABLE = False
+    print("Warning: Translation library not available, installing...")
+    os.system("pip install deep-translator")
 
 Path(DB_FILE).parent.mkdir(exist_ok=True)
 Path(OUTPUT_DIR).mkdir(exist_ok=True)
@@ -36,55 +46,39 @@ class ArticleDB:
     def count(self):
         return len(self.seen)
 
-def translate_to_chinese(text):
-    """简单的翻译函数（使用规则+字典）"""
-    # 简单的技术术语翻译
-    translations = {
-        "AI": "AI",
-        "Machine Learning": "机器学习",
-        "Deep Learning": "深度学习",
-        "Python": "Python",
-        "JavaScript": "JavaScript",
-        "TypeScript": "TypeScript",
-        "Rust": "Rust",
-        "Go": "Go",
-        "GitHub": "GitHub",
-        "Docker": "Docker",
-        "Kubernetes": "Kubernetes",
-        "Linux": "Linux",
-        "Security": "安全",
-        "Privacy": "隐私",
-        "Cloud": "云",
-        "Database": "数据库",
-        "API": "API",
-        "Web Development": "Web开发",
-        "Frontend": "前端",
-        "Backend": "后端",
-        "DevOps": "DevOps",
-        "Data Science": "数据科学",
-        "Tutorial": "教程",
-        "Guide": "指南",
-        "How to": "如何",
-        "Introduction": "介绍",
-        "Overview": "概述",
-        "Getting Started": "入门指南",
-    }
+def translate_text(text, max_length=5000):
+    """翻译文本到中文"""
+    if not ENABLE_TRANSLATION or not text:
+        return text
 
-    # 移除 HTML 标签
+    # 检查是否已经包含中文
+    if any('\u4e00' <= c <= '\u9fff' for c in text):
+        return text
+
+    # 清理 HTML 标签
     import re
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
 
-    # 简单的标记检测和提示
-    chinese_note = ""
-    if any(ord(c) > 127 for c in text):
-        # 已经包含中文字符
+    if not text:
         return text
-    else:
-        # 英文内容，添加翻译提示
-        chinese_note = " [英文]"
 
-    return text + chinese_note
+    # 限制长度
+    if len(text) > max_length:
+        text = text[:max_length] + "..."
+
+    try:
+        # 使用 deep_translator 翻译
+        if TRANSLATION_AVAILABLE:
+            from deep_translator import GoogleTranslator
+            translator = GoogleTranslator(source='auto', target='zh-CN')
+            translated = translator.translate(text)
+            return translated
+        else:
+            return text + " [翻译功能暂不可用]"
+    except Exception as e:
+        print(f"Translation error: {e}", file=sys.stderr)
+        return text
 
 def parse_opml(opml_file):
     sources = []
@@ -125,20 +119,21 @@ def main():
                 db.add(link)
                 total_new += 1
 
-                # 获取标题和描述
+                # 获取原始内容
                 title = entry.get('title', 'No title')
-                description = entry.get('description', '')[:200]
+                description = entry.get('description', '')
 
-                # 如果启用了翻译
-                if TRANSLATE_TO_CHINESE:
-                    title = translate_to_chinese(title)
-                    description = translate_to_chinese(description)
+                # 翻译标题和描述
+                if ENABLE_TRANSLATION:
+                    print(f"翻译: {title[:50]}...")
+                    title = translate_text(title)
+                    description = translate_text(description[:300])
 
                 article = {
                     'blog': source['name'],
                     'title': title,
                     'link': link,
-                    'desc': description,
+                    'desc': description[:200],
                     'date': entry.get('published', '')
                 }
                 articles.append(article)
@@ -153,7 +148,7 @@ def main():
     content = f"""# RSS 每日摘要 - {date_str}
 
 > 生成时间: {date_str} {time_str}
-> 📌 说明：英文文章标记为 [英文]，已尽可能识别技术术语
+> 🌐 已自动翻译为中文
 
 ## 📊 今日统计
 
@@ -170,7 +165,7 @@ def main():
     for article in articles:
         content += f"### 📌 {article['blog']}\n\n"
         content += f"- **{article['title']}**\n"
-        if article['desc'] and article['desc'] != 'No title':
+        if article['desc'] and len(article['desc']) > 10:
             content += f"  > {article['desc']}...\n"
         content += f"  > 🔗 [阅读原文]({article['link']})\n"
         if article['date']:
@@ -194,11 +189,11 @@ def main():
 
 ## 🔖 标签
 
-#DailyRSS #技术博客 #HackerNews #新文章 #{date_str}
+#DailyRSS #技术博客 #HackerNews #新文章 #{date_str} #中文翻译
 
 ---
 
-*本笔记由 GitHub Actions 自动生成*
+*本笔记由 GitHub Actions 自动生成，内容已翻译为中文*
 """
 
     with open(filepath, 'w', encoding='utf-8') as f:
