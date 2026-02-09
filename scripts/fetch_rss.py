@@ -3,7 +3,7 @@ import os
 import sys
 import hashlib
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import feedparser
 import html
@@ -13,6 +13,7 @@ OPML_FILE = "opml/feeds.opml"
 DB_FILE = ".rss/articles.db"
 OUTPUT_DIR = "Daily RSS"
 ENABLE_TRANSLATION = True  # 启用翻译
+MAX_ARTICLE_AGE_HOURS = 48  # 只抓取最近 48 小时内的文章
 
 try:
     from deep_translator import GoogleTranslator
@@ -103,6 +104,26 @@ def parse_opml(opml_file):
 
     return sources
 
+def is_article_recent(published_date):
+    """检查文章是否在指定的时间范围内"""
+    if not published_date:
+        # 如果没有发布日期，默认接受（可能是新文章）
+        return True
+
+    try:
+        # 尝试解析多种日期格式
+        parsed_date = feedparser._parse_date(published_date)
+        if parsed_date:
+            # 计算文章发布时间与当前时间的差值
+            time_diff = datetime.now(parsed_date.tzinfo) - parsed_date
+            # 检查是否在指定小时数内
+            return time_diff.total_seconds() <= (MAX_ARTICLE_AGE_HOURS * 3600)
+    except Exception as e:
+        # 如果解析失败，默认接受
+        print(f"Warning: Could not parse date '{published_date}': {e}", file=sys.stderr)
+
+    return True
+
 def main():
     db = ArticleDB(DB_FILE)
 
@@ -116,14 +137,27 @@ def main():
     articles = []
     total_new = 0
     total_seen = 0
+    total_old = 0  # 统计因时间过滤而跳过的旧文章
 
     for source in sources:
         try:
             feed = feedparser.parse(source['url'])
             for entry in feed.entries[:3]:
                 link = entry.get('link', '')
-                if not link or db.is_seen(link):
+                if not link:
+                    continue
+
+                # 检查是否已见过
+                if db.is_seen(link):
                     total_seen += 1
+                    continue
+
+                # 检查文章发布时间是否在允许范围内
+                published = entry.get('published', entry.get('updated', ''))
+                if not is_article_recent(published):
+                    total_old += 1
+                    # 将旧文章的 URL 也加入数据库，避免下次重复检查
+                    db.add(link)
                     continue
 
                 db.add(link)
@@ -144,7 +178,7 @@ def main():
                     'title': title,
                     'link': link,
                     'desc': description[:200],
-                    'date': entry.get('published', '')
+                    'date': published
                 }
                 articles.append(article)
         except Exception as e:
@@ -159,11 +193,13 @@ def main():
 
 > 生成时间: {date_str} {time_str}
 > 🌐 已自动翻译为中文
+> ⏰ 仅显示最近 {MAX_ARTICLE_AGE_HOURS} 小时内的文章
 
 ## 📊 今日统计
 
 - 🆕 新文章: {total_new}
 - 📋 已跳过（重复）: {total_seen}
+- ⏰ 已跳过（过旧）: {total_old}
 - 📚 数据库总文章: {db.count()}
 
 ---
@@ -192,9 +228,11 @@ def main():
 |------|------|
 | 🆕 新文章 | {total_new} |
 | 📋 已跳过（重复） | {total_seen} |
+| ⏰ 已跳过（过旧） | {total_old} |
 | 📚 数据库总文章 | {db.count()} |
 
 - 生成时间: {date_str} {time_str}
+- 时间范围: 最近 {MAX_ARTICLE_AGE_HOURS} 小时
 - 数据来源: [HN 2025 热门博客](https://gist.github.com/emschwartz/e6d2bf860ccc367fe37ff953ba6de66b)
 
 ## 🔖 标签
@@ -211,7 +249,8 @@ def main():
 
     print(f"\n✅ 完成!")
     print(f"  新文章: {total_new}")
-    print(f"  已跳过: {total_seen}")
+    print(f"  已跳过（重复）: {total_seen}")
+    print(f"  已跳过（过旧）: {total_old}")
     print(f"  数据库总数: {db.count()}")
     print(f"  笔记文件: {filepath}")
 
