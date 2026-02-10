@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# 配置 SSL 上下文以支持 Substack 等 RSS 源
+import ssl
+import urllib.request
+ssl._create_default_https_context = ssl._create_unverified_context
+
 import os
 import sys
 import hashlib
