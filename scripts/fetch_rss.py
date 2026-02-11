@@ -109,25 +109,23 @@ def parse_opml(opml_file):
 
     return sources
 
-def is_article_recent(published_date):
+def is_article_recent(parsed_time_struct):
     """检查文章是否在指定的时间范围内"""
-    if not published_date:
+    if not parsed_time_struct:
         # 如果没有发布日期，默认接受（可能是新文章）
         return True
 
     try:
-        # 尝试解析多种日期格式
-        parsed_date = feedparser._parse_date(published_date)
-        if parsed_date:
-            # 计算文章发布时间与当前时间的差值
-            time_diff = datetime.now(parsed_date.tzinfo) - parsed_date
-            # 检查是否在指定小时数内
-            return time_diff.total_seconds() <= (MAX_ARTICLE_AGE_HOURS * 3600)
+        # 将 time_struct 转换为 datetime 对象
+        parsed_date = datetime(*parsed_time_struct[:6])
+        # 计算文章发布时间与当前时间的差值
+        time_diff = datetime.now() - parsed_date
+        # 检查是否在指定小时数内
+        return time_diff.total_seconds() <= (MAX_ARTICLE_AGE_HOURS * 3600)
     except Exception as e:
-        # 如果解析失败，默认接受
-        print(f"Warning: Could not parse date '{published_date}': {e}", file=sys.stderr)
-
-    return True
+        # 如果解析失败，默认拒绝（更安全的策略）
+        print(f"Warning: Could not parse date: {e}", file=sys.stderr)
+        return False
 
 def main():
     db = ArticleDB(DB_FILE)
@@ -158,8 +156,10 @@ def main():
                     continue
 
                 # 检查文章发布时间是否在允许范围内
+                published_parsed = entry.get('published_parsed', entry.get('updated_parsed'))
                 published = entry.get('published', entry.get('updated', ''))
-                if not is_article_recent(published):
+
+                if not is_article_recent(published_parsed):
                     total_old += 1
                     # 将旧文章的 URL 也加入数据库，避免下次重复检查
                     db.add(link)
@@ -176,13 +176,19 @@ def main():
                 if ENABLE_TRANSLATION:
                     print(f"翻译: {title[:50]}...")
                     title = translate_text(title)
-                    description = translate_text(description[:300])
+                    # 先翻译完整描述，然后再截断
+                    description = translate_text(description)
+
+                # 截断描述到固定长度
+                max_desc_length = 300
+                if description and len(description) > max_desc_length:
+                    description = description[:max_desc_length] + "..."
 
                 article = {
                     'blog': source['name'],
                     'title': title,
                     'link': link,
-                    'desc': description[:200],
+                    'desc': description,
                     'date': published
                 }
                 articles.append(article)
@@ -216,8 +222,8 @@ def main():
     for article in articles:
         content += f"### 📌 {article['blog']}\n\n"
         content += f"- **{article['title']}**\n"
-        if article['desc'] and len(article['desc']) > 10:
-            content += f"  > {article['desc']}...\n"
+        if article['desc']:
+            content += f"  > {article['desc']}\n"
         content += f"  > 🔗 [阅读原文]({article['link']})\n"
         if article['date']:
             content += f"  > 📅 {article['date']}\n"
