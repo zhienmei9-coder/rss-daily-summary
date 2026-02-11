@@ -1,1 +1,4 @@
 LnJzcy8KKi5weWMKX19weWNhY2hlX18KKQo=
+.rss/*.log
+scripts/__pycache__/
+*.pyc
