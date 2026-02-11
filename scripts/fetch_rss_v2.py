@@ -52,6 +52,19 @@ class Config:
     test_mode: bool = False
     dry_run: bool = False
 
+    # 特殊 RSS 源配置（无日期/描述的源）
+    # 格式: {"blog名称": {"max_articles": 数量, "default_desc": "默认描述"}}
+    special_sources: dict = field(default_factory=lambda: {
+        "paulgraham.com": {
+            "max_articles": 2,
+            "default_desc": "Paul Graham 的经典文章 - 关于创业、编程和思考"
+        },
+        "chadnauseam.com": {
+            "max_articles": 1,
+            "default_desc": "经济学和个人思考文章"
+        }
+    })
+
 # ============================================================================
 # 日志系统
 # ============================================================================
@@ -216,12 +229,17 @@ class Translator:
 # 时间过滤（改进版）
 # ============================================================================
 
-def is_article_recent(parsed_time_struct, max_hours: int) -> Tuple[bool, Optional[datetime], str]:
+def is_article_recent(parsed_time_struct, max_hours: int, is_special_source: bool = False) -> Tuple[bool, Optional[datetime], str]:
     """
     检查文章是否在指定时间范围内
     返回: (是否在范围内, 解析后的日期, 信息)
+
+    对于特殊源（无日期的RSS），允许通过但标记为特殊来源
     """
     if not parsed_time_struct:
+        if is_special_source:
+            # 特殊源没有日期，但允许接受（只取最新几篇）
+            return (True, None, "特殊源：无日期限制")
         return (False, None, "无发布日期")
 
     try:
@@ -235,6 +253,8 @@ def is_article_recent(parsed_time_struct, max_hours: int) -> Tuple[bool, Optiona
         return (is_recent, parsed_date, info)
 
     except Exception as e:
+        if is_special_source:
+            return (True, None, "特殊源：日期解析错误")
         return (False, None, f"日期解析错误: {e}")
 
 # ============================================================================
@@ -300,16 +320,25 @@ def fetch_articles(config: Config, db: ArticleDB, translator: Translator, logger
         'errors': 0,
         'sources_success': 0,
         'sources_failed': 0,
+        'special_source_articles': 0,  # 特殊源文章数
     }
 
     for i, source in enumerate(sources, 1):
         logger.info(f"[{i}/{len(sources)}] 抓取: {source['name']}")
 
+        # 检查是否是特殊源
+        is_special = source['name'] in config.special_sources
+        special_config = config.special_sources.get(source['name'], {})
+        max_articles = special_config.get('max_articles', config.max_articles_per_feed)
+
+        if is_special:
+            logger.info(f"  ⚡ 特殊源: 最多 {max_articles} 篇")
+
         try:
             feed = feedparser.parse(source['url'])
             entries_count = 0
 
-            for entry in feed.entries[:config.max_articles_per_feed]:
+            for entry in feed.entries[:max_articles]:
                 try:
                     link = entry.get('link', '')
                     if not link:
@@ -327,7 +356,8 @@ def fetch_articles(config: Config, db: ArticleDB, translator: Translator, logger
 
                     is_recent, parsed_date, date_info = is_article_recent(
                         published_parsed,
-                        config.max_article_age_hours
+                        config.max_article_age_hours,
+                        is_special_source=is_special  # 传递特殊源标志
                     )
 
                     if not is_recent:
@@ -343,6 +373,12 @@ def fetch_articles(config: Config, db: ArticleDB, translator: Translator, logger
                     # 获取内容
                     title = entry.get('title', 'No title')
                     description = entry.get('description', '')
+
+                    # 特殊源：无描述时使用默认描述
+                    if not description or description.strip() == '':
+                        if special_config and 'default_desc' in special_config:
+                            description = special_config['default_desc']
+                            logger.debug(f"  使用默认描述")
 
                     # 翻译
                     if translator.available:
@@ -363,6 +399,8 @@ def fetch_articles(config: Config, db: ArticleDB, translator: Translator, logger
                     )
                     articles.append(article)
                     entries_count += 1
+                    if is_special:
+                        stats['special_source_articles'] += 1
                     logger.debug(f"  + {title[:50]}")
 
                 except Exception as e:
