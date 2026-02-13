@@ -36,7 +36,7 @@ class Config:
     # 文件路径
     opml_file: str = "opml/feeds.opml"
     db_file: str = ".rss/articles.db"
-    output_dir: str = "Daily RSS"
+    output_dir: str = ""  # Git 仓库根目录
     log_file: str = ".rss/fetch.log"
 
     # 功能开关
