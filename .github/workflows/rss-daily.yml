@@ -3,6 +3,50 @@ name: RSS Daily Summary
 on:
   schedule:
     # 每天 UTC 18:42 运行（北京时间次日 02:42，延迟后约 07:24 推送）
+    - cron: '42 18 * * *'
+  workflow_dispatch:  # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-rss:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install feedparser python-dateutil deep-translator
+
+      - name: Download OPML
+        run: |
+          mkdir -p opml
+          curl -s "https://gist.githubusercontent.com/emschwartz/e6d2bf860ccc367fe37ff953ba6de66b/raw/hn-popular-blogs-2025.opml" -o opml/feeds.opml
+
+      - name: Fetch RSS and generate summary
+        run: |
+          python3 scripts/fetch_rss.py
+
+      - name: Commit and push
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
+          git diff --quiet && git diff --staged --quiet || git commit -m "🤖 Update RSS summary - $(date +'%Y-%m-%d')"
+          git push
+name: RSS Daily Summary
+
+on:
+  schedule:
+    # 每天 UTC 18:42 运行（北京时间次日 02:42，延迟后约 07:24 推送）
 - cron: '42 18 * * *'
   workflow_dispatch:  # 允许手动触发
 
