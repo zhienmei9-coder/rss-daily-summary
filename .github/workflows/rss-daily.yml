@@ -3,7 +3,8 @@ name: RSS Daily Summary
 on:
   schedule:
     # 每天 UTC 18:42 运行（北京时间次日 02:42，延迟后约 07:24 推送）
-- cron: "42 18 * * *" workflow_dispatch:  # 允许手动触发
+- cron: '42 18 * * *'
+  workflow_dispatch:  # 允许手动触发
 
 permissions:
   contents: write
