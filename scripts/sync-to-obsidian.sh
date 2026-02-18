@@ -94,7 +94,7 @@ fi
 
 # 获取今天的日期
 TODAY=$(date '+%Y-%m-%d')
-SOURCE_FILE="${REPO_DIR}/Daily RSS/RSS摘要_${TODAY}.md"
+SOURCE_FILE="${REPO_DIR}/RSS摘要_${TODAY}.md"
 TARGET_FILE="${OBSIDIAN_DIR}/RSS摘要_${TODAY}.md"
 
 # 检查 GitHub Actions 是否已运行
